@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <title>Monitor de Alertas NAVAREA V</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-sA+e2atcfwlJq1s1qkRB7c0lHjUHs5aLx3oMxnYwA6A=" crossorigin=""/>
+  <style>
+    html, body {
+      margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif;
+      background-color: #f2f6fa;
+    }
+    #mapa {
+      position: absolute; top: 0; left: 0; height: 100%; width: calc(100% - 360px);
+    }
+    #painel {
+      position: absolute; top: 0; right: 0; width: 360px; height: 100%; background: #ffffff; z-index: 10;
+      box-shadow: -2px 0 6px rgba(0,0,0,0.1); padding: 20px; overflow-y: auto;
+      border-left: 4px solid #002c5f;
+    }
+    h1 {
+      font-size: 18px; margin-bottom: 20px; color: #002c5f;
+    }
+    label {
+      display: block; font-size: 14px; margin-top: 12px; color: #002c5f;
+    }
+    input, select {
+      width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; margin-top: 4px;
+    }
+    button {
+      background: #002c5f; color: white; border: none; padding: 10px 16px; margin-top: 20px;
+      border-radius: 4px; width: 100%; font-size: 14px; cursor: pointer;
+    }
+    ul.alertas {
+      margin-top: 30px; padding-left: 0; list-style: none;
+    }
+    ul.alertas li {
+      background: #cc000033; border: 1px solid #cc0000; margin-bottom: 8px; padding: 8px; border-radius: 4px;
+      cursor: pointer;
+    }
+    ul.alertas li:hover {
+      background: #cc000099;
+    }
+  </style>
+</head>
+<body>
+  <div id="mapa"></div>
+  <div id="painel">
+    <h1>Plano de Viagem</h1>
+    <label for="waypoint">Waypoint (nome, lat, lon)</label>
+    <input id="waypoint" placeholder="Ex: Ilha Rasa, -23.0, -43.1">
+    <button onclick="adicionarWaypoint()">Adicionar Waypoint</button>
+
+    <label for="velocidade">Velocidade (nós)</label>
+    <input id="velocidade" type="number" placeholder="Ex: 10">
+
+    <label for="etd">Data/hora de saída (ETD)</label>
+    <input id="etd" type="datetime-local">
+
+    <label for="eta">Data/hora de chegada (ETA)</label>
+    <input id="eta" type="text" readonly>
+
+    <button onclick="calcularDerrota()">Calcular Rota</button>
+
+    <ul class="alertas" id="lista-alertas"></ul>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-pcoYwc3jOGfCBa4Kd0BlpLrgO8QFZMDtAcxD+4F3Cxo=" crossorigin=""></script>
+  <script>
+    const mapa = L.map('mapa').setView([-23, -43], 8);
+    L.tileLayer('https://tiles.openseamap.org/seamark/{z}/{x}/{y}.png', {
+      attribution: '© OpenSeaMap', maxZoom: 18
+    }).addTo(mapa);
+
+    const waypoints = [];
+    let linhaDerrota;
+
+    function adicionarWaypoint() {
+      const valor = document.getElementById("waypoint").value.trim();
+      const partes = valor.split(',');
+      if (partes.length === 3) {
+        const nome = partes[0].trim();
+        const lat = parseFloat(partes[1]);
+        const lon = parseFloat(partes[2]);
+        if (!isNaN(lat) && !isNaN(lon)) {
+          waypoints.push({ nome, lat, lon });
+          L.marker([lat, lon]).addTo(mapa).bindPopup(nome);
+        }
+      }
+      document.getElementById("waypoint").value = "";
+    }
+
+    function calcularDerrota() {
+      if (linhaDerrota) mapa.removeLayer(linhaDerrota);
+      if (waypoints.length < 2) return alert("Adicione pelo menos dois waypoints.");
+
+      const coords = waypoints.map(p => [p.lat, p.lon]);
+      linhaDerrota = L.polyline(coords, { color: '#002c5f' }).addTo(mapa);
+      mapa.fitBounds(linhaDerrota.getBounds());
+
+      let totalMilhas = 0;
+      for (let i = 1; i < coords.length; i++) {
+        totalMilhas += mapa.distance(coords[i-1], coords[i]) / 1852;
+      }
+
+      const velocidade = parseFloat(document.getElementById("velocidade").value);
+      const etd = new Date(document.getElementById("etd").value);
+      if (isNaN(velocidade) || !etd.getTime()) return alert("Preencha a velocidade e ETD.");
+
+      const horas = totalMilhas / velocidade;
+      const chegada = new Date(etd.getTime() + horas * 3600000);
+      document.getElementById("eta").value = chegada.toLocaleString();
+    }
+
+    async function carregarAlertas() {
+      const res = await fetch("/alertas");
+      const alertas = await res.json();
+      const lista = document.getElementById("lista-alertas");
+      lista.innerHTML = "";
+      alertas.forEach(alerta => {
+        const item = document.createElement("li");
+        item.textContent = alerta.titulo;
+        item.title = alerta.descricao;
+        lista.appendChild(item);
+
+        const poligono = L.polygon(alerta.poligono, {
+          color: alerta.cor || "#cc0000",
+          fillColor: alerta.cor || "#cc0000",
+          fillOpacity: 0.2
+        }).addTo(mapa);
+        L.circleMarker(alerta.centro, {
+          radius: 6, color: alerta.cor || "#cc0000", fillOpacity: 1
+        }).addTo(mapa).bindPopup(`<strong>${alerta.titulo}</strong><br>${alerta.descricao}`);
+      });
+    }
+
+    carregarAlertas();
+  </script>
+</body>
+</html>
